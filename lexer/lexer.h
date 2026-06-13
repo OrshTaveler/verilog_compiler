@@ -1,3 +1,6 @@
+#ifndef LEXER_H
+#define LEXER_H
+
 #include "../general/general.h"
 
 #define MAX_WORD_LEN 100
@@ -26,17 +29,23 @@ typedef enum
     INITIAL,
     INTEGER,
     WHILE,
+    FOR,
 
     INPUT,
     OUTPUT,
+    
+    TASK,
+    ENDTASK,
 
     // operators
     PLUS, MINUS, STAR, SLASH,
+    INC, DEC,
     EQ,        // =
     LT, LTEQ,      // <= (non-blocking assignment)
     BT, BTEQ,
     EQEQ, NEQ,
     AND, OR,
+    LOGIC_NOT,
     BIT_AND, BIT_OR, BIT_XOR, BIT_NOT,
     SHARP, //#
 
@@ -58,6 +67,8 @@ typedef struct
     int str_number;
     int position;
     char* value;
+    long num_val;
+    int width;
     token_type type;
 } Token;
 
@@ -69,3 +80,5 @@ typedef struct
 
 Token* tokenize(const char* input, unsigned int* tokens_len, unsigned int len);
 const char* token_to_string(Token token);
+
+#endif

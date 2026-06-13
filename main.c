@@ -4,6 +4,8 @@
 #define LEXER_DEF_H
 #endif
 #include "ast/parser.h"
+#include "ast/optimization.h"
+#include "detecter_unsused_variables/detecter.h"
 
 
 
@@ -32,9 +34,19 @@ int main(){
 
     size_t token_pointer = 0;
 
-    if (parseExpression(tokens, &token_pointer, token_len, root)) {
+    if (parseDesign(tokens,&token_pointer,token_len,root)) {
+        int optimizations;
+
         printf("Parse OK\n\n");
         ast_print(root);
+
+        optimizations = optimize_ast(root);
+        if (optimizations > 0) {
+            printf("\nOptimized constants: %d\n\n", optimizations);
+            ast_print(root);
+        }
+
+        run_ast_detectors(root);
     } else {
         printf("Parse error\n");
     }

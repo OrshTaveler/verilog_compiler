@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include "lexer.h"
 
-#define TABLE_OP_START 17
+#define TABLE_OP_START 20
 #define TABLE_START 0
 
 const int MAX_RESERVED_WORD_LEN = 128;
@@ -28,12 +28,17 @@ const Lexeme lexemes[] = {
     {"output",OUTPUT},
     {"integer",INTEGER},
     {"while",WHILE},
+    {"for",FOR},
+    {"task",TASK},
+    {"endtask",ENDTASK},
 
     // operators
     {"+", PLUS},
     {"-", MINUS},
     {"*", STAR},
     {"/", SLASH},
+    {"++", INC},
+    {"--", DEC},
 
     {"=", EQ},
     {"<", LT},
@@ -46,6 +51,7 @@ const Lexeme lexemes[] = {
 
     {"&&", AND},
     {"||", OR},
+    {"!", LOGIC_NOT},
 
     {"&", BIT_AND},
     {"|", BIT_OR},
@@ -74,15 +80,24 @@ int is_string(const char* s, unsigned int* position) {
 
     if (s[*position] != '"') return 0;
     
-    position++;
+    (*position)++;
 
-    while (isalpha(s[*position])) (*position)++;
-    
-    if (s[*position] != '"'){
-        *position = backup_position;
-        return -1;
+    while (s[*position] != '\0' && s[*position] != '\n') {
+        if (s[*position] == '\\' && s[*position + 1] != '\0') {
+            (*position) += 2;
+            continue;
+        }
+
+        if (s[*position] == '"') {
+            (*position)++;
+            return 1;
+        }
+
+        (*position)++;
     }
-    return 1;
+    
+    *position = backup_position;
+    return -1;
 }
 
 int is_identifier_char(char c) {
@@ -128,22 +143,122 @@ token_type is_reserved(const char* s, unsigned int* position, unsigned int table
 }
 
 
+static int digit_value(char c)
+{
+    c = (char)tolower(c);
+
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+
+    return -1;
+}
+
+static int base_from_char(char c)
+{
+    switch (tolower(c)) {
+        case 'b': return 2;
+        case 'o': return 8;
+        case 'd': return 10;
+        case 'h': return 16;
+        default: return 0;
+    }
+}
+
+static int bits_per_digit_for_base(int base)
+{
+    switch (base) {
+        case 2: return 1;
+        case 8: return 3;
+        case 10: return 4;
+        case 16: return 4;
+        default: return 1;
+    }
+}
+
+static int parse_number_token(Token* token)
+{
+    char* quote;
+    char* digits;
+    int base;
+    int explicit_width = 0;
+    int digit_count = 0;
+    long value = 0;
+
+    if (token == NULL || token->value == NULL)
+        return 0;
+
+    token->width = 0;
+
+    quote = strchr(token->value, '\'');
+    if (quote == NULL) {
+        char* endptr;
+        token->num_val = strtol(token->value, &endptr, 10);
+        if (endptr == token->value)
+            return 0;
+
+        token->width = 0;
+        return 1;
+    }
+
+    if (quote != token->value)
+        explicit_width = (int)strtol(token->value, NULL, 10);
+
+    base = base_from_char(*(quote + 1));
+    if (base == 0)
+        return 0;
+
+    digits = quote + 2;
+    for (char* p = digits; *p != '\0'; p++) {
+        int digit;
+
+        if (*p == '_')
+            continue;
+        if (tolower(*p) == 'x' || tolower(*p) == 'z') {
+            digit_count++;
+            continue;
+        }
+
+        digit = digit_value(*p);
+        if (digit < 0 || digit >= base)
+            return 0;
+
+        value = value * base + digit;
+        digit_count++;
+    }
+
+    token->num_val = value;
+    token->width = explicit_width > 0
+        ? explicit_width
+        : digit_count * bits_per_digit_for_base(base);
+
+    if (token->width <= 0)
+        token->width = 1;
+
+    return 1;
+}
+
 int is_verilog_number(const char* s, unsigned int* position, Token* prev_token) {
     unsigned int backup_position = *position;
-    
+    int saw_digits = 0;
 
     if (s[*(position)] == '-'){
         if (prev_token->type == NUMBER || prev_token->type == ID) return -1;
 
         (*position)++;
-        printf("val = %c, digit - %d, prev - %c\n",s[*position] , isdigit(s[*position]), s[*(position)-1]);
-        if (!isdigit(s[*position])) return -1;
+        if (!isdigit(s[*position])) {
+            *position = backup_position;
+            return -1;
+        }
     }
     
-    while (isdigit(s[*position])) (*position)++;
+    while (isdigit(s[*position])) {
+        (*position)++;
+        saw_digits = 1;
+    }
 
-
-    if (*position == backup_position)
+    if (!saw_digits && s[*position] != '\'')
         return -1;
 
     if (s[*position] != '\'') {
@@ -159,15 +274,21 @@ int is_verilog_number(const char* s, unsigned int* position, Token* prev_token) 
         return -1;
     }
 
-    unsigned int second_part_start = *position;
-
-    while (isdigit(s[*position]) || tolower(s[*position]) == 'x' ||
-           tolower(s[*position]) == 'z' ||
-           (((*position) > (second_part_start+1)) && s[*position] == '_') ||
-           (((*position) == (second_part_start+1)) &&
-            (s[*position] == 'b' || s[*position] == 'h' ||
-             s[*position] == 'o' || s[*position] == 'd'))) {
+    if (s[*position] == '\'') {
         (*position)++;
+
+        if (base_from_char(s[*position]) == 0) {
+            *position = backup_position;
+            return -1;
+        }
+        (*position)++;
+
+        while (isxdigit(s[*position]) ||
+               tolower(s[*position]) == 'x' ||
+               tolower(s[*position]) == 'z' ||
+               s[*position] == '_') {
+            (*position)++;
+        }
     }
 
     return 1;
@@ -210,6 +331,7 @@ Token* tokenize(const char* input, unsigned int* t_len, unsigned int len){
     tokens_len = 0;
 
     Token prev_token;
+    prev_token.type = NONE;
 
     for (unsigned int i = 0; i < len; i++){
         // Counting lines 
@@ -268,6 +390,15 @@ Token* tokenize(const char* input, unsigned int* t_len, unsigned int len){
         tokens[tokens_len].value = malloc(token_size + 1);
         memcpy(tokens[tokens_len].value, input + start, token_size);
         tokens[tokens_len].value[token_size] = '\0';
+
+        char *endptr;
+        if (tokens[tokens_len].type == NUMBER) {
+           (void)endptr;
+           if (!parse_number_token(&tokens[tokens_len])) return 0;
+        } else {
+           tokens[tokens_len].num_val = 0;
+           tokens[tokens_len].width = 0;
+        }
         
         tokens[tokens_len].position = position_on_line;
         tokens[tokens_len].str_number = lines;

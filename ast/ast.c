@@ -28,6 +28,13 @@ static void ast_free_typed_node(struct ASTNode* node)
             break;
         }
 
+        case AST_STRING: {
+            ASTString* string = (ASTString*)node->typedNode;
+            free(string);
+
+            break;
+        }
+
         case AST_IDENTIFIER: {
             ASTIdentifier* identifier = (ASTIdentifier*)node->typedNode;
             free(identifier);
@@ -136,12 +143,39 @@ int ast_module_init(ASTModule* module, char* id)
     return 1;
 }
 
+int ast_wire_init(ASTWire* wire, char* id, int width, PortDirection direction, WireType type) {
+    if (wire == NULL || id == NULL) return 0;
+
+    wire->direction = direction;
+    wire->width = width;
+    wire->type = type;
+    strlcpy(wire->id, id, ID_LEN);
+
+    return 1;
+}
+
 int ast_const_init(ASTConstant* constant, int value)
+{
+    return ast_const_init_width(constant, value, 0);
+}
+
+int ast_const_init_width(ASTConstant* constant, int value, int width)
 {
     if (constant == NULL)
         return 0;
 
     constant->value = value;
+    constant->width = width;
+
+    return 1;
+}
+
+int ast_string_init(ASTString* string, char* value)
+{
+    if (string == NULL || value == NULL)
+        return 0;
+
+    strlcpy(string->value, value, ID_LEN);
 
     return 1;
 }
@@ -194,6 +228,7 @@ static const char* ast_node_type_to_string(NodeType type)
         case AST_LOCALPARAM: return "AST_LOCALPARAM";
 
         case AST_CONSTANT: return "AST_CONSTANT";
+        case AST_STRING: return "AST_STRING";
         case AST_IDENTIFIER: return "AST_IDENTIFIER";
 
         case AST_FCALL: return "AST_FCALL";
@@ -231,6 +266,10 @@ static const char* ast_node_type_to_string(NodeType type)
 
         case AST_POS: return "AST_POS";
         case AST_NEG: return "AST_NEG";
+        case AST_PRE_INC: return "AST_PRE_INC";
+        case AST_PRE_DEC: return "AST_PRE_DEC";
+        case AST_POST_INC: return "AST_POST_INC";
+        case AST_POST_DEC: return "AST_POST_DEC";
 
         case AST_LOGIC_AND: return "AST_LOGIC_AND";
         case AST_LOGIC_OR: return "AST_LOGIC_OR";
@@ -255,6 +294,10 @@ static const char* ast_node_type_to_string(NodeType type)
         case AST_POSEDGE: return "AST_POSEDGE";
         case AST_NEGEDGE: return "AST_NEGEDGE";
         case AST_EDGE: return "AST_EDGE";
+
+        case AST_IF: return "AST_IF";
+
+        case AST_EQEQ: return "AST_EQEQ";
 
         default: return "AST_UNKNOWN";
     }
@@ -290,6 +333,18 @@ static void ast_print_typed_node(struct ASTNode* node)
 
             if (constant != NULL) {
                 printf(" value=%d", constant->value);
+                if (constant->width > 0)
+                    printf(" width=%d", constant->width);
+            }
+
+            break;
+        }
+
+        case AST_STRING: {
+            ASTString* string = (ASTString*)node->typedNode;
+
+            if (string != NULL) {
+                printf(" value=%s", string->value);
             }
 
             break;
@@ -311,7 +366,7 @@ static void ast_print_typed_node(struct ASTNode* node)
             if (wire != NULL) {
                 printf(" id=\"%s\"", wire->id);
                 printf(" width=%d", wire->width);
-                printf(" value=%d", wire->value);
+
 
                 switch (wire->direction) {
                     case DIR_INPUT:
